@@ -1,6 +1,10 @@
 use crate::map;
 use bevy::{prelude::*, sprite::Anchor};
 use rand::prelude::*;
+use seldom_state::{
+    prelude::{AnyState, BoolTrigger, StateMachine, Trigger, TriggerPlugin},
+    StateMachinePlugin,
+};
 
 const MOVE_SPEED: f32 = 100.0;
 
@@ -21,29 +25,48 @@ struct PlayerSpawnEvent {
     vertex_spawn: Entity,
 }
 
-#[derive(Component)]
+#[derive(Clone, Component, Reflect)]
 struct Player {
     current_vertex: Entity,
-    next_vertexes: Vec<Entity>,
+    next_entity: Vec<Entity>,
+    animation_timer: f32,
+    roation_index: i32,
 }
 
-pub struct PlayersPlugin;
+#[derive(Clone, Component, Reflect)]
+#[component(storage = "SparseSet")]
+struct Idle;
 
-impl Plugin for PlayersPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_startup_system_to_stage(StartupStage::PreStartup, setup)
-            .add_startup_system_to_stage(StartupStage::PostStartup, test_spawn_player)
-            // .add_startup_system_to_stage(StartupStage::PostStartup, setup_entity_adjacencies)
-            .add_system(spawn_players)
-            .add_event::<PlayerSpawnEvent>()
-            .add_system(move_players);
-        // // .add_event::<VertexSelectEvent>()
-        // // .add_system(vertex_click_to_spawn)
-        // // .add_system(edge_spawn)
-        // // .add_system(select_vertex_adjacent_vertexes)
-        // .add_system(animate_mana);
+#[derive(Clone, Copy, Component, Reflect)]
+#[component(storage = "SparseSet")]
+struct GoToSelection {
+    speed: f32,
+}
+
+#[derive(Clone, Copy, Reflect)]
+struct GoToTrigger;
+
+impl Trigger for GoToTrigger {
+    type Param<'w, 's> = Query<'w, 's, &'static Player>;
+
+    type Ok = Entity;
+
+    type Err = i32;
+
+    fn trigger(
+        &self,
+        entity: Entity,
+        players: &Self::Param<'_, '_>,
+    ) -> Result<bevy::prelude::Entity, i32> {
+        let player = players.get(entity).unwrap();
+        if player.next_entity.len() > 0 {
+            return Ok(player.next_entity[0]);
+        } else {
+            return Err(0);
+        }
     }
 }
+
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let player_textures = PlayerTextures {
         player: asset_server.load("./players/obisan-Sheet.png"),
@@ -123,8 +146,14 @@ fn spawn_players(
                 })
                 .insert(Player {
                     current_vertex: entity,
-                    next_vertexes: Vec::new(),
+                    next_entity: Vec::new(),
+                    animation_timer: 0.0,
+                    roation_index: 0,
                 })
+                .insert(
+                    StateMachine::new(Idle)
+                        .trans::<AnyState>(GoToTrigger, GoToSelection { speed: 100.0 }),
+                )
                 .id();
         }
 
@@ -148,8 +177,8 @@ fn move_players(
     time: Res<Time>,
 ) {
     for (_entity, mut pos, mut player) in players.iter_mut() {
-        if player.next_vertexes.len() > 0 {
-            if let Ok((_e, vert_pos, _adj, mut vert)) = vertexes.get_mut(player.next_vertexes[0]) {
+        if player.next_entity.len() > 0 {
+            if let Ok((_e, vert_pos, _adj, mut vert)) = vertexes.get_mut(player.next_entity[0]) {
                 let direction = Vec2::new(
                     vert_pos.translation.x - pos.translation.x,
                     vert_pos.translation.y - pos.translation.y,
@@ -157,6 +186,22 @@ fn move_players(
                 .normalize();
 
                 pos.translation += direction.extend(0.0) * MOVE_SPEED * time.delta_seconds();
+
+                let mut angle = direction.y.atan2(direction.x);
+                while angle > 360.0 / 2.0 {
+                    angle -= 360.0;
+                }
+
+                while angle < -360.0 / 2.0 {
+                    angle += 360.0;
+                }
+
+                if angle >= 0.0 {
+                    player.roation_index = (angle % (360.0 / 8.0)).ceil() as i32;
+                }
+                if angle < 0.0 {
+                    player.roation_index = (angle % (360.0 / 8.0)).floor() as i32;
+                }
 
                 if (direction.x > 0.0 && pos.translation.x > vert_pos.translation.x)
                     || (direction.x < 0.0 && pos.translation.x < vert_pos.translation.x)
@@ -172,24 +217,82 @@ fn move_players(
                         vertt.filled = false
                     }
 
-                    player.current_vertex = player.next_vertexes.remove(0);
+                    player.current_vertex = player.next_entity.remove(0);
                 }
             }
         } else {
-            if let Ok((_e, _vert_pos, adj, _vert)) = vertexes.get_mut(player.current_vertex) {
-                let mut rng = rand::thread_rng();
-                let y: f32 = rng.gen();
+            // if let Ok((_e, _vert_pos, adj, _vert)) = vertexes.get_mut(player.current_vertex) {
+            //     let mut rng = rand::thread_rng();
+            //     let y: f32 = rng.gen();
 
-                let index = (y * adj.vertex_list.len() as f32) as usize;
+            //     let index = (y * adj.vertex_list.len() as f32) as usize;
 
-                let next_vert = adj.vertex_list[index];
+            //     let next_vert = adj.vertex_list[index];
 
-                if let Ok((_e, _vert_pos, _adj, vert)) = vertexes.get_mut(next_vert) {
-                    if !vert.filled {
-                        player.next_vertexes.push(next_vert);
-                    }
-                }
-            }
+            //     if let Ok((_e, _vert_pos, _adj, vert)) = vertexes.get_mut(next_vert) {
+            //         if !vert.filled {
+            //             player.next_entity.push(next_vert);
+            //         }
+            //     }
+            // }
         }
+    }
+}
+
+fn animate_player(
+    mut gotoselections: Query<
+        (Entity, &mut TextureAtlasSprite, &mut Player, &GoToSelection),
+        Without<Idle>,
+    >,
+    mut idles: Query<(Entity, &mut TextureAtlasSprite, &mut Player, &Idle), Without<GoToSelection>>,
+    time: Res<Time>,
+) {
+    for (entity, mut sprite, mut player, idle) in &mut idles {
+        player.animation_timer += time.delta_seconds() * 2.0;
+        if player.animation_timer > 6.0 {
+            player.animation_timer = 0.0;
+        }
+        //{-3:"Walk_northwest",-2:"Walk_north",-1:"Walk_northeast",0:"Walk_east",1:"Walk_southeast",2:"Walk_south",3:"Walk_southwest",4:"Walk_west"}
+
+        let mut angle = player.roation_index % 8;
+
+        sprite.index = 6 * angle as usize + (player.animation_timer) as usize;
+    }
+
+    for (entity, mut sprite, mut player, idle) in &mut gotoselections {
+        player.animation_timer += time.delta_seconds() * 2.0;
+        if player.animation_timer > 6.0 {
+            player.animation_timer = 0.0;
+        }
+        //{-3:"Walk_northwest",-2:"Walk_north",-1:"Walk_northeast",0:"Walk_east",1:"Walk_southeast",2:"Walk_south",3:"Walk_southwest",4:"Walk_west"}
+
+        let mut angle = player.roation_index - 4;
+
+        if angle < 0 {
+            angle += 8;
+        }
+
+        sprite.index = 6 * angle as usize + (player.animation_timer) as usize;
+    }
+}
+
+pub struct PlayersPlugin;
+
+impl Plugin for PlayersPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_startup_system_to_stage(StartupStage::PreStartup, setup)
+            .add_startup_system_to_stage(StartupStage::PostStartup, test_spawn_player)
+            .add_plugin(StateMachinePlugin)
+            // .add_startup_system_to_stage(StartupStage::PostStartup, setup_entity_adjacencies)
+            .add_system(spawn_players)
+            .add_event::<PlayerSpawnEvent>()
+            .add_system(move_players)
+            .add_system(animate_player)
+            .add_plugin(TriggerPlugin::<GoToTrigger>::default());
+        // // .add_event::<VertexSelectEvent>()
+        // // .add_system(vertex_click_to_spawn)
+        // // .add_system(edge_spawn)
+        // // .add_system(select_vertex_adjacent_vertexes)
+        // .add_system(animate_mana);
     }
 }
