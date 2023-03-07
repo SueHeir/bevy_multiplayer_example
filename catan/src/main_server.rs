@@ -9,19 +9,21 @@ use bevy_quinnet::{
     shared::{channel::ChannelId, ClientId},
 };
 
-use protocol::{ClientMessage, ServerMessage};
+use protocol::{ClientEvent, ClientMessage, ServerMessage};
 
 mod camera;
 mod map;
 mod players;
 mod protocol;
+mod server;
 
-#[derive(Resource, Debug, Clone, Default)]
-struct Users {
-    names: HashMap<ClientId, String>,
-}
-
-fn handle_client_messages(mut server: ResMut<Server>, mut users: ResMut<Users>) {
+fn handle_client_messages(
+    mut server: ResMut<Server>,
+    mut users: ResMut<protocol::Users>,
+    mut player_spawn: EventWriter<players::PlayerSpawnEvent>,
+    mut client_event: EventWriter<protocol::ClientEvent>,
+    mut init_map: EventWriter<map::InitMapSend>,
+) {
     let endpoint = server.endpoint_mut();
     for client_id in endpoint.clients() {
         while let Some(message) = endpoint.try_receive_message_from::<ClientMessage>(client_id) {
@@ -55,6 +57,16 @@ fn handle_client_messages(mut server: ResMut<Server>, mut users: ResMut<Users>) 
                                 },
                             )
                             .unwrap();
+                        //Send Map
+                        init_map.send(map::InitMapSend { client_id });
+                        //Spawn Player
+                        player_spawn.send(players::PlayerSpawnEvent {
+                            current_vertex: None,
+                            x: None,
+                            y: None,
+                            id: None,
+                            client_owner_id: client_id,
+                        });
                     }
                 }
                 ClientMessage::Disconnect {} => {
@@ -77,6 +89,16 @@ fn handle_client_messages(mut server: ResMut<Server>, mut users: ResMut<Users>) 
                         },
                     );
                 }
+                ClientMessage::SendEvent {
+                    name,
+                    map_type,
+                    type_id,
+                } => client_event.send(ClientEvent {
+                    name,
+                    map_type,
+                    type_id,
+                    client_id,
+                }),
             }
         }
     }
@@ -85,7 +107,7 @@ fn handle_client_messages(mut server: ResMut<Server>, mut users: ResMut<Users>) 
 fn handle_server_events(
     mut connection_lost_events: EventReader<ConnectionLostEvent>,
     mut server: ResMut<Server>,
-    mut users: ResMut<Users>,
+    mut users: ResMut<protocol::Users>,
 ) {
     // The server signals us about users that lost connection
     for client in connection_lost_events.iter() {
@@ -94,7 +116,11 @@ fn handle_server_events(
 }
 
 /// Shared disconnection behaviour, whether the client lost connection or asked to disconnect
-fn handle_disconnect(endpoint: &mut Endpoint, users: &mut ResMut<Users>, client_id: ClientId) {
+fn handle_disconnect(
+    endpoint: &mut Endpoint,
+    users: &mut ResMut<protocol::Users>,
+    client_id: ClientId,
+) {
     // Remove this user
     if let Some(username) = users.names.remove(&client_id) {
         // Broadcast its deconnection
@@ -116,20 +142,33 @@ fn handle_disconnect(endpoint: &mut Endpoint, users: &mut ResMut<Users>, client_
     }
 }
 
-fn start_listening(mut server: ResMut<Server>) {
+#[derive(Resource)]
+struct PlayerChannel(ChannelId);
+
+fn start_listening(mut server: ResMut<Server>, mut commands: Commands) {
     server
         .start_endpoint(
             ServerConfigurationData::new("127.0.0.1".to_string(), 6000, "0.0.0.0".to_string()),
             CertificateRetrievalMode::GenerateSelfSigned,
         )
         .unwrap();
+
+    let player_channel: PlayerChannel = PlayerChannel(
+        server
+            .endpoint_mut()
+            .open_channel(bevy_quinnet::shared::channel::ChannelType::OrderedReliable)
+            .unwrap(),
+    );
+
+    commands.insert_resource(player_channel);
 }
 
 fn main() {
     App::new()
+        .insert_resource(protocol::IsServer(true))
         // run the server at a reduced tick rate (35 ticks per second)
         .insert_resource(ScheduleRunnerSettings::run_loop(Duration::from_secs_f32(
-            1. / 35.,
+            1. / 30.,
         )))
         .add_plugins(
             DefaultPlugins
@@ -138,8 +177,8 @@ fn main() {
                     WindowPlugin {
                         window: WindowDescriptor {
                             title: "Catan Server".to_owned(),
-                            width: 320.0,
-                            height: 180.0,
+                            width: 640.0,
+                            height: 360.0,
 
                             ..Default::default()
                         },
@@ -150,14 +189,17 @@ fn main() {
                 .set(ImagePlugin::default_nearest()),
         )
         .add_startup_system(setup)
+        .add_plugin(QuinnetServerPlugin::default())
         .add_plugin(map::MapPlugin)
         .add_plugin(players::PlayersPlugin)
         .add_plugin(camera::CameraPlugin)
-        .add_plugin(QuinnetServerPlugin::default())
-        .insert_resource(Users::default())
+        .add_plugin(server::ServerPlugin)
+        .insert_resource(protocol::Users::default())
         .add_startup_system(start_listening)
         .add_system(handle_client_messages)
         .add_system(handle_server_events)
+        .add_event::<protocol::ClientEvent>()
+        // .add_system(send_game_state)
         .run();
 }
 

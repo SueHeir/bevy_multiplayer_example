@@ -23,7 +23,7 @@ serde = { version = "1.0.152", features = ["derive"] }
 rand = "0.8.5"
 bevy_quinnet = "0.3.0"
 seldom_state = "0.4.0"
-
+bevy_easings = "0.9.1"
 
 
 # Enable a small amount of optimization in debug mode

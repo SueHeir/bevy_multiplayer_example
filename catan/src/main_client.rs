@@ -13,17 +13,13 @@ use bevy_quinnet::{
 };
 
 mod camera;
+mod client;
 mod map;
 mod players;
 
+use players::PlayerSpawnEvent;
 use protocol::{ClientMessage, ServerMessage};
 mod protocol;
-
-#[derive(Resource, Debug, Clone, Default)]
-struct Users {
-    self_id: ClientId,
-    names: HashMap<ClientId, String>,
-}
 
 fn setup(mut _commands: Commands) {
 
@@ -62,7 +58,30 @@ fn start_connection(mut client: ResMut<Client>) {
     // When trully connected, you will receive a ConnectionEvent
 }
 
-fn handle_server_messages(mut users: ResMut<Users>, mut client: ResMut<Client>) {
+fn join_game(mut client: ResMut<Client>) {
+    let x = rand::random::<u32>();
+    if let Ok(_temp) = client.connection_mut().send_message(ClientMessage::Join {
+        name: "Test".to_owned() + &x.to_string(),
+    }) {
+    } else {
+        println!("Failed to Join Game");
+    }
+}
+
+fn handle_server_messages(
+    mut users: ResMut<protocol::Users>,
+    mut client: ResMut<Client>,
+    mut init_map: EventWriter<map::MapObjectSpawnEvent>,
+    mut init_player: EventWriter<players::PlayerSpawnEvent>,
+    mut players_query: Query<
+        (Entity, &mut Transform, &mut players::Player),
+        (With<players::Player>, Without<map::Vertex>),
+    >,
+    vertex_query: Query<(Entity, &mut map::Vertex), (With<map::Vertex>, Without<players::Player>)>,
+
+    mut map_is_init: Local<bool>,
+    mut commands: Commands,
+) {
     while let Some(message) = client
         .connection_mut()
         .try_receive_message::<ServerMessage>()
@@ -98,15 +117,128 @@ fn handle_server_messages(mut users: ResMut<Users>, mut client: ResMut<Client>) 
                 users.self_id = client_id;
                 users.names = usernames;
             }
+
+            ServerMessage::InitMap {
+                vertexes,
+                edges,
+                materials,
+            } => {
+                for vert in vertexes.iter() {
+                    init_map.send(map::MapObjectSpawnEvent {
+                        map_type: map::VERTEX,
+                        map_type_id: vert.id,
+                        x: vert.x,
+                        y: vert.y,
+                        roation: 0.0,
+                        edge_list: vert.adjacentices.edge_list.clone(),
+                        vertex_list: vert.adjacentices.vertex_list.clone(),
+                        material_list: vert.adjacentices.material_list.clone(),
+                        material_type: None,
+                        vertex_start: vert.is_start_vertex,
+                    })
+                }
+                for edge in edges.iter() {
+                    init_map.send(map::MapObjectSpawnEvent {
+                        map_type: map::EDGE,
+                        map_type_id: edge.id,
+                        x: edge.x,
+                        y: edge.y,
+                        roation: edge.rotation,
+                        edge_list: edge.adjacentices.edge_list.clone(),
+                        vertex_list: edge.adjacentices.vertex_list.clone(),
+                        material_list: edge.adjacentices.material_list.clone(),
+                        material_type: None,
+                        vertex_start: false,
+                    })
+                }
+                for material in materials.iter() {
+                    init_map.send(map::MapObjectSpawnEvent {
+                        map_type: map::MATERIAL,
+                        map_type_id: material.id,
+                        x: material.x,
+                        y: material.y,
+                        roation: 0.0,
+                        edge_list: material.adjacentices.edge_list.clone(),
+                        vertex_list: material.adjacentices.vertex_list.clone(),
+                        material_list: material.adjacentices.material_list.clone(),
+                        material_type: Some(material.material_type),
+                        vertex_start: false,
+                    })
+                }
+                *map_is_init = true;
+            }
+            ServerMessage::UpdatePlayers { players } => {
+                if *map_is_init {
+                    for play in players.iter() {
+                        let mut vert = None;
+                        let mut next_vert = None;
+
+                        for (e, vertex) in vertex_query.iter() {
+                            if vertex.id == play.current_vertex {
+                                vert = Some(e);
+                                // println!("{}", vertex.id);
+                                // println!("{}", play.current_vertex);
+                            }
+                            if vertex.id == play.next_vertex {
+                                next_vert = Some(e);
+                                // println!("{}", vertex.id);
+                                // println!("{}", play.current_vertex);
+                            }
+                        }
+
+                        if vert.is_some() {
+                            let mut player_found = false;
+                            for (e, mut pos, mut player) in players_query.iter_mut() {
+                                if play.id == player.id {
+                                    player_found = true;
+                                    pos.translation.x = play.x;
+                                    pos.translation.y = play.y;
+                                    player.current_vertex = vert.unwrap();
+                                    player.roation_index = play.rotation;
+                                    if next_vert.is_some() {
+                                        player.next_entity.push(next_vert.unwrap());
+                                    }
+                                    player.next_entity_id = Some(play.next_vertex);
+                                }
+                            }
+
+                            if !player_found {
+                                init_player.send(PlayerSpawnEvent {
+                                    current_vertex: vert,
+                                    x: Some(play.x),
+                                    y: Some(play.y),
+                                    id: Some(play.id),
+                                    client_owner_id: play.client_owner_id,
+                                })
+                            }
+                        } else {
+                            info!("Can't find vertex to spawn player")
+                        }
+                    }
+                    for (e, _pos, player) in players_query.iter() {
+                        let mut player_found = false;
+                        for play in players.iter() {
+                            if play.id == player.id {
+                                player_found = true;
+                            }
+                        }
+
+                        if !player_found {
+                            commands.entity(e).despawn();
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 fn main() {
     App::new()
+        .insert_resource(protocol::IsServer(false))
         // run the server at a reduced tick rate (35 ticks per second)
         .insert_resource(ScheduleRunnerSettings::run_loop(Duration::from_secs_f32(
-            1. / 35.,
+            1. / 30.,
         )))
         .add_plugins(
             DefaultPlugins
@@ -114,9 +246,9 @@ fn main() {
                     // here we configure the main window
                     WindowPlugin {
                         window: WindowDescriptor {
-                            title: "Catan Server".to_owned(),
-                            width: 320.0,
-                            height: 180.0,
+                            title: "Catan Client".to_owned(),
+                            width: 640.0,
+                            height: 360.0,
 
                             ..Default::default()
                         },
@@ -130,9 +262,12 @@ fn main() {
         .add_plugin(map::MapPlugin)
         .add_plugin(players::PlayersPlugin)
         .add_plugin(camera::CameraPlugin)
+        .add_plugin(client::ClientPlugin)
         .add_plugin(QuinnetClientPlugin::default())
-        .insert_resource(Users::default())
+        .add_plugin(bevy_quinnet::server::QuinnetServerPlugin::default())
+        .insert_resource(protocol::Users::default())
         .add_startup_system(start_connection)
+        .add_startup_system_to_stage(StartupStage::PostStartup, join_game)
         .add_system(handle_server_messages)
         .add_system(on_app_exit)
         .add_system(handle_server_messages)

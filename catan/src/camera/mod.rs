@@ -1,11 +1,12 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+use bevy_easings::{EasingsPlugin, Lerp};
 use bevy_interact_2d::InteractionPlugin;
 use bevy_interact_2d::{Group, InteractionSource};
 use bevy_mouse_tracking_plugin::prelude::*;
 use leafwing_input_manager::prelude::*;
 
-use crate::map;
+use crate::{map, players};
 
 pub struct CameraPlugin;
 
@@ -20,7 +21,9 @@ impl Plugin for CameraPlugin {
             .add_plugin(MousePosPlugin)
             .add_plugin(InputManagerPlugin::<Action>::default())
             .add_system(zoom_system)
-            .add_system(move_system);
+            .add_system(move_system)
+            .add_system(track_owned_player)
+            .add_plugin(EasingsPlugin);
     }
 }
 
@@ -117,4 +120,29 @@ fn move_system(
         MOVE_SPEED * y_axis as f32 * time.delta_seconds(),
     )
     .extend(0.0);
+}
+
+fn track_owned_player(
+    mut cam: Query<
+        (
+            &mut Transform,
+            &mut OrthographicProjection,
+            &ActionState<Action>,
+        ),
+        (With<MainCamera>, Without<players::ControlledPlayer>),
+    >,
+    player: Query<&Transform, (Without<MainCamera>, With<players::ControlledPlayer>)>,
+) {
+    if let Ok(pos_p) = player.get_single() {
+        let (mut pos_c, mut _cam, action) = cam.single_mut();
+
+        if action.pressed(Action::Up)
+            || action.pressed(Action::Down)
+            || action.pressed(Action::Right)
+            || action.pressed(Action::Left)
+        {
+        } else {
+            pos_c.translation = pos_c.translation.lerp(pos_p.translation, 0.03);
+        }
+    }
 }

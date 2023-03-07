@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 use bevy_interact_2d::{Group, Interactable, InteractionState};
-use serde::Deserialize;
+use bevy_quinnet::server::Server;
+use serde::{Deserialize, Serialize};
 use serde_json;
+
+use crate::protocol;
 
 pub const MAPCLICKABLE: u8 = 0;
 pub const VERTEX: u8 = 1;
@@ -16,31 +19,36 @@ pub const PURPLE: u8 = 4;
 pub const ORANGE: u8 = 5;
 
 #[derive(Component)]
-struct MapClickable {
-    selected: bool,
+pub struct MapClickable {
+    pub selected: bool,
+    hover: bool,
     map_type: u8,
     mana_type: u8,
     animation_timer: f32,
 }
 
-struct MapObjectSpawnEvent {
-    map_type: u8,
-    map_type_id: u32,
-    x: f32,
-    y: f32,
-    roation: f32,
-    edge_list: Vec<u32>,
-    vertex_list: Vec<u32>,
-    material_list: Vec<u32>,
-    material_type: Option<u8>,
-    vertex_start: bool,
+pub struct MapObjectSpawnEvent {
+    pub map_type: u8,
+    pub map_type_id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub roation: f32,
+    pub edge_list: Vec<u32>,
+    pub vertex_list: Vec<u32>,
+    pub material_list: Vec<u32>,
+    pub material_type: Option<u8>,
+    pub vertex_start: bool,
 }
 
-#[derive(Component)]
-struct Adjacencies {
-    edge_list: Vec<u32>,
-    vertex_list: Vec<u32>,
-    material_list: Vec<u32>,
+pub struct InitMapSend {
+    pub client_id: u64,
+}
+
+#[derive(Component, Debug, Clone, Serialize, Deserialize)]
+pub struct Adjacencies {
+    pub edge_list: Vec<u32>,
+    pub vertex_list: Vec<u32>,
+    pub material_list: Vec<u32>,
 }
 #[derive(Component)]
 pub struct EntityAdjacencies {
@@ -50,12 +58,16 @@ pub struct EntityAdjacencies {
 }
 
 #[derive(Component)]
-pub struct Edge(u32);
+pub struct Edge {
+    id: u32,
+    roation: f32,
+}
 
 #[derive(Component)]
 pub struct Vertex {
-    id: u32,
+    pub id: u32,
     pub filled: bool,
+    pub is_start: bool,
 }
 
 #[derive(Component)]
@@ -119,26 +131,11 @@ struct MapInitManaConnections {
     b: i32,
 }
 
-pub struct MapPlugin;
-
-impl Plugin for MapPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_startup_system_to_stage(StartupStage::PreStartup, setup)
-            .add_startup_system_to_stage(StartupStage::Startup, spawn_map_object_system)
-            .add_startup_system_to_stage(StartupStage::PostStartup, setup_entity_adjacencies)
-            .add_system(click_map_object)
-            .add_event::<MapObjectSpawnEvent>()
-            // .add_event::<VertexSelectEvent>()
-            // .add_system(vertex_click_to_spawn)
-            // .add_system(edge_spawn)
-            // .add_system(select_vertex_adjacent_vertexes)
-            .add_system(animate_mana);
-    }
-}
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut map_generator: EventWriter<MapObjectSpawnEvent>,
+    is_server: Res<protocol::IsServer>,
 ) {
     let map_textures = MapTextures {
         vertex: asset_server.load("circle.png"),
@@ -161,6 +158,10 @@ fn setup(
     };
 
     commands.insert_resource(map_textures);
+
+    if !is_server.0 {
+        return;
+    }
 
     let map_file_name = "./assets/levels/level_3.json";
 
@@ -281,19 +282,29 @@ fn setup(
     }
 }
 
-fn animate_mana(
-    mut query: Query<(Entity, &mut TextureAtlasSprite, &mut MapClickable), With<Material>>,
+fn animate_map_objects(
+    mut query: Query<(Entity, &mut TextureAtlasSprite, &mut MapClickable), With<MapClickable>>,
     time: Res<Time>,
 ) {
     for (_entity, mut sprite, mut clickable) in query.iter_mut() {
-        clickable.animation_timer += time.delta_seconds() * 1.0;
-        if clickable.animation_timer > 6.0 {
-            clickable.animation_timer = 0.0;
-        }
+        if clickable.map_type == MATERIAL {
+            clickable.animation_timer += time.delta_seconds() * 1.0;
+            if clickable.animation_timer > 6.0 {
+                clickable.animation_timer = 0.0;
+            }
 
-        sprite.index = 6 * clickable.mana_type as usize
-            + 6 * 6 * clickable.selected as usize
-            + (clickable.animation_timer) as usize;
+            sprite.index = 6 * clickable.mana_type as usize
+                + 6 * 6 * clickable.selected as usize
+                + (clickable.animation_timer) as usize;
+        } else {
+            if clickable.selected {
+                sprite.index = 2
+            } else if clickable.hover {
+                sprite.index = 1
+            } else {
+                sprite.index = 0
+            }
+        }
     }
 }
 
@@ -309,10 +320,10 @@ fn click_map_object(
         ),
         With<MapClickable>,
     >,
-    keys: Res<Input<KeyCode>>,
+    // keys: Res<Input<KeyCode>>,
     // mut vertex_test: EventWriter<VertexSelectEvent>,
 ) {
-    let mut double_selected_entity: Option<Entity> = None;
+    // let mut double_selected_entity: Option<Entity> = None;
 
     for (entity, mut sprite, mut clickable, _adj) in query.iter_mut() {
         if interaction_state
@@ -323,74 +334,77 @@ fn click_map_object(
         {
             if mouse_button_input.just_released(MouseButton::Left) {
                 // info!("Clicked.");
-                if clickable.selected == true {
-                    double_selected_entity = Some(entity.clone());
-                }
+                // if clickable.selected == true {
+                //     double_selected_entity = Some(entity.clone());
+                // }
 
-                if clickable.map_type != MATERIAL {
-                    sprite.index = 2;
-                }
+                // if clickable.map_type != MATERIAL {
+                //     sprite.index = 2;
+                // }
                 clickable.selected = true;
             } else if clickable.selected != true {
                 if sprite.index == 0 {
                     // info!("Hover.");
+                    clickable.hover = true;
                 }
-                if clickable.map_type != MATERIAL {
-                    sprite.index = 1;
-                }
+                // if clickable.map_type != MATERIAL {
+                //     sprite.index = 1;
+                // }
             }
         } else {
-            let mut double_select = false;
+            // let mut double_select = false;
 
-            for key in keys.get_pressed() {
-                match key {
-                    KeyCode::LShift => {
-                        double_select = true;
-                    }
-                    _ => {}
-                }
-            }
+            // for key in keys.get_pressed() {
+            //     match key {
+            //         KeyCode::LShift => {
+            //             double_select = true;
+            //         }
+            //         _ => {}
+            //     }
+            // }
 
-            if mouse_button_input.just_released(MouseButton::Left) && !double_select {
+            if mouse_button_input.just_released(MouseButton::Left) {
+                // && !double_select {
                 // info!("Deselected.");
                 clickable.selected = false;
             }
             if clickable.selected != true {
                 if sprite.index == 1 {
                     // info!("Stop Hover.");
+                    clickable.hover = false;
                 }
-                if clickable.map_type != MATERIAL {
-                    sprite.index = 0;
-                }
+                // if clickable.map_type != MATERIAL {
+                //     sprite.index = 0;
+                // }
             }
         }
     }
-    if double_selected_entity.is_some() {
-        let mut adjacent = Vec::new();
-        if let Ok((_entity, mut _sprite, mut _clickable, adj)) =
-            query.get_mut(double_selected_entity.unwrap())
-        {
-            for vert in adj.vertex_list.iter() {
-                adjacent.push(*vert)
-            }
-            for edge in adj.edge_list.iter() {
-                adjacent.push(*edge)
-            }
-            for material in adj.material_list.iter() {
-                adjacent.push(*material)
-            }
-        }
+    // if double_selected_entity.is_some() {
+    //     let mut adjacent = Vec::new();
+    //     if let Ok((_entity, mut _sprite, mut _clickable, adj)) =
+    //         query.get_mut(double_selected_entity.unwrap())
+    //     {
+    //         for vert in adj.vertex_list.iter() {
+    //             adjacent.push(*vert)
+    //         }
+    //         for edge in adj.edge_list.iter() {
+    //             adjacent.push(*edge)
+    //         }
+    //         for material in adj.material_list.iter() {
+    //             adjacent.push(*material)
+    //         }
+    //     }
 
-        for adjac in adjacent.iter() {
-            if let Ok((_entity, mut sprite, mut clickable, _adj)) = query.get_mut(*adjac) {
-                clickable.selected = true;
-                if clickable.map_type != MATERIAL {
-                    sprite.index = 2;
-                }
-            }
-        }
-    } else {
-    }
+    //     for adjac in adjacent.iter() {
+    //         if let Ok((_entity, mut sprite, mut clickable, _adj)) = query.get_mut(*adjac) {
+    //             clickable.selected = true;
+    //             if clickable.map_type != MATERIAL {
+    //                 sprite.index = 2;
+    //             }
+    //         }
+    //     }
+    // } else {
+    // }
 }
 
 // fn select_vertex_adjacent_vertexes(
@@ -409,6 +423,74 @@ fn click_map_object(
 //         }
 //     }
 // }
+
+fn handle_init_map_send(
+    mut init_map_event: EventReader<InitMapSend>,
+    vertexes: Query<
+        (Entity, &Transform, &Adjacencies, &Vertex),
+        (With<Vertex>, Without<Edge>, Without<Material>),
+    >,
+    edges: Query<
+        (Entity, &Transform, &Adjacencies, &Edge),
+        (With<Edge>, Without<Vertex>, Without<Material>),
+    >,
+    materials: Query<
+        (Entity, &Transform, &Adjacencies, &Material, &MapClickable),
+        (With<Material>, Without<Vertex>, Without<Edge>),
+    >,
+    mut server: ResMut<Server>,
+) {
+    if init_map_event.len() > 0 {
+        let mut vertexes_data = Vec::<protocol::Vertex>::new();
+        let mut edges_data = Vec::<protocol::Edge>::new();
+        let mut materials_data = Vec::<protocol::Material>::new();
+
+        for (_e, pos, adj, vert) in vertexes.iter() {
+            vertexes_data.push(protocol::Vertex {
+                id: vert.id,
+                adjacentices: adj.clone(),
+                x: pos.translation.x,
+                y: pos.translation.y,
+                is_start_vertex: vert.is_start,
+            })
+        }
+
+        for (_e, pos, adj, edge) in edges.iter() {
+            edges_data.push(protocol::Edge {
+                id: edge.id,
+                adjacentices: adj.clone(),
+                x: pos.translation.x,
+                y: pos.translation.y,
+                rotation: edge.roation,
+            })
+        }
+
+        for (_e, pos, adj, mat, click) in materials.iter() {
+            materials_data.push(protocol::Material {
+                id: mat.0,
+                adjacentices: adj.clone(),
+                x: pos.translation.x,
+                y: pos.translation.y,
+                material_type: click.mana_type,
+            })
+        }
+
+        for init_map in init_map_event.iter() {
+            if let Ok(_result) = server.endpoint_mut().send_message(
+                init_map.client_id,
+                protocol::ServerMessage::InitMap {
+                    vertexes: vertexes_data.clone(),
+                    edges: edges_data.clone(),
+                    materials: materials_data.clone(),
+                },
+            ) {
+                info!("Sent map to Client");
+            } else {
+                info!("Failed to send map to Client");
+            }
+        }
+    }
+}
 
 fn spawn_map_object_system(
     mut spawn_data: EventReader<MapObjectSpawnEvent>,
@@ -446,6 +528,7 @@ fn spawn_map_object_system(
                     .insert(Vertex {
                         id: spawn.map_type_id,
                         filled: false,
+                        is_start: spawn.vertex_start,
                     })
                     .insert(Adjacencies {
                         vertex_list: spawn.vertex_list.clone(),
@@ -459,6 +542,7 @@ fn spawn_map_object_system(
                     })
                     .insert(MapClickable {
                         selected: false,
+                        hover: false,
                         map_type: VERTEX,
                         animation_timer: 0.0,
                         mana_type: 0,
@@ -512,9 +596,13 @@ fn spawn_map_object_system(
                     edge_list: Vec::new(),
                     material_list: Vec::new(),
                 })
-                .insert(Edge(spawn.map_type_id))
+                .insert(Edge {
+                    id: spawn.map_type_id,
+                    roation: spawn.roation,
+                })
                 .insert(MapClickable {
                     selected: false,
+                    hover: false,
                     map_type: EDGE,
                     animation_timer: 0.0,
                     mana_type: 0,
@@ -558,6 +646,7 @@ fn spawn_map_object_system(
                 })
                 .insert(MapClickable {
                     selected: false,
+                    hover: false,
                     map_type: spawn.map_type,
                     animation_timer: 0.0,
                     mana_type: spawn.material_type.unwrap(),
@@ -595,7 +684,7 @@ fn setup_entity_adjacencies(
 
     for (entity, mut entity_adjacencies, adjacencies, _vertex) in vertexes.iter_mut() {
         for (edge_entity, mut edge_entity_adj, _edge_adj, edge) in edges.iter_mut() {
-            if adjacencies.edge_list.contains(&edge.0) {
+            if adjacencies.edge_list.contains(&edge.id) {
                 entity_adjacencies.edge_list.push(edge_entity);
                 edge_entity_adj.vertex_list.push(entity);
             }
@@ -720,3 +809,22 @@ fn setup_entity_adjacencies(
 //         }
 //     }
 // }
+
+pub struct MapPlugin;
+
+impl Plugin for MapPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_startup_system_to_stage(StartupStage::PreStartup, setup)
+            .add_system(spawn_map_object_system.pipe(setup_entity_adjacencies))
+            // .add_startup_system_to_stage(StartupStage::PostStartup, setup_entity_adjacencies)
+            .add_system(click_map_object)
+            .add_event::<MapObjectSpawnEvent>()
+            .add_event::<InitMapSend>()
+            .add_system(handle_init_map_send)
+            // .add_event::<VertexSelectEvent>()
+            // .add_system(vertex_click_to_spawn)
+            // .add_system(edge_spawn)
+            // .add_system(select_vertex_adjacent_vertexes)
+            .add_system(animate_map_objects);
+    }
+}

@@ -357,6 +357,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_easings"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e581985cd96ed1a15f75f2fab552c98dcf2ba9c5c1849bbce8914259f096ad51"
+dependencies = [
+ "bevy",
+ "interpolation",
+]
+
+[[package]]
 name = "bevy_ecs"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1009,6 +1019,7 @@ name = "catan"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_easings",
  "bevy_interact_2d",
  "bevy_mouse_tracking_plugin",
  "bevy_quinnet",
@@ -1901,6 +1912,12 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
 ]
+
+[[package]]
+name = "interpolation"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3b7357d2bbc5ee92f8e899ab645233e43d21407573cceb37fed8bc3dede2c02"
 
 [[package]]
 name = "io-kit-sys"

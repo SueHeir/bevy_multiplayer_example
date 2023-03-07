@@ -1,4 +1,4 @@
-{"map_start_vertexes": [0,1], 
+{"map_start_vertexes": [0,1,5,10,15,20], 
 "vertex_positions": [
 {"x":-348,"y":-74},
 {"x":-274,"y":-148},
