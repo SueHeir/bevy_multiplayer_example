@@ -1,42 +1,58 @@
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
-use bevy_easings::{EasingsPlugin, Lerp};
+use bevy_easings::EasingsPlugin;
 use bevy_interact_2d::InteractionPlugin;
 use bevy_interact_2d::{Group, InteractionSource};
-use bevy_mouse_tracking_plugin::prelude::*;
 use leafwing_input_manager::prelude::*;
 
-use crate::{map, players};
+use crate::map;
 
+mod client_camera;
 pub struct CameraPlugin;
 
 static ZOOM_SPEED: f32 = 0.05;
 static MIN_ZOOM: f32 = 0.35;
 static MAX_ZOOM: f32 = 1.0;
 static MOVE_SPEED: f32 = 200.0;
+
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_startup_system(setup)
+        app.add_plugin(EasingsPlugin)
             .add_plugin(InteractionPlugin)
-            .add_plugin(MousePosPlugin)
-            .add_plugin(InputManagerPlugin::<Action>::default())
+            .add_plugin(InputManagerPlugin::<CameraAction>::default())
+            .add_startup_system(setup)
             .add_system(zoom_system)
-            .add_system(move_system)
-            .add_system(track_owned_player)
-            .add_plugin(EasingsPlugin);
+            .add_system(move_system);
+    }
+}
+
+pub struct ServerCameraPlugin;
+
+impl Plugin for ServerCameraPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugin(CameraPlugin);
+    }
+}
+
+pub struct ClientCameraPlugin;
+
+impl Plugin for ClientCameraPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugin(CameraPlugin)
+            .add_system(client_camera::track_owned_player);
     }
 }
 
 // This is the list of "things in the game I want to be able to do based on input"
 #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
-enum Action {
+pub enum CameraAction {
     Up,
     Down,
     Left,
     Right,
 }
-
-use bevy_mouse_tracking_plugin::MainCamera;
+#[derive(Component)]
+pub struct MainCamera;
 
 fn setup(mut commands: Commands) {
     commands
@@ -60,17 +76,17 @@ fn setup(mut commands: Commands) {
             ],
             ..Default::default()
         })
-        .add_world_tracking()
-        .add_mouse_tracking()
-        .insert(InputManagerBundle::<Action> {
+        // .add_world_tracking()
+        // .add_mouse_tracking()
+        .insert(InputManagerBundle::<CameraAction> {
             // Stores "which actions are currently pressed"
             action_state: ActionState::default(),
             // Describes how to convert from player inputs into those actions
             input_map: InputMap::new([
-                (KeyCode::W, Action::Up),
-                (KeyCode::S, Action::Down),
-                (KeyCode::A, Action::Left),
-                (KeyCode::D, Action::Right),
+                (KeyCode::W, CameraAction::Up),
+                (KeyCode::S, CameraAction::Down),
+                (KeyCode::A, CameraAction::Left),
+                (KeyCode::D, CameraAction::Right),
             ]),
         })
         .insert(MainCamera);
@@ -93,23 +109,23 @@ fn zoom_system(
 
 fn move_system(
     mut cam: Query<(&mut Transform, &mut OrthographicProjection), With<MainCamera>>,
-    camera_actions: Query<&ActionState<Action>, With<MainCamera>>,
+    camera_actions: Query<&ActionState<CameraAction>, With<MainCamera>>,
     time: Res<Time>,
 ) {
     let action_state = camera_actions.single();
 
     let mut x_axis = 0;
     let mut y_axis = 0;
-    if action_state.pressed(Action::Up) {
+    if action_state.pressed(CameraAction::Up) {
         y_axis += 1;
     }
-    if action_state.pressed(Action::Down) {
+    if action_state.pressed(CameraAction::Down) {
         y_axis -= 1;
     }
-    if action_state.pressed(Action::Right) {
+    if action_state.pressed(CameraAction::Right) {
         x_axis += 1;
     }
-    if action_state.pressed(Action::Left) {
+    if action_state.pressed(CameraAction::Left) {
         x_axis -= 1;
     }
 
@@ -120,29 +136,4 @@ fn move_system(
         MOVE_SPEED * y_axis as f32 * time.delta_seconds(),
     )
     .extend(0.0);
-}
-
-fn track_owned_player(
-    mut cam: Query<
-        (
-            &mut Transform,
-            &mut OrthographicProjection,
-            &ActionState<Action>,
-        ),
-        (With<MainCamera>, Without<players::ControlledPlayer>),
-    >,
-    player: Query<&Transform, (Without<MainCamera>, With<players::ControlledPlayer>)>,
-) {
-    if let Ok(pos_p) = player.get_single() {
-        let (mut pos_c, mut _cam, action) = cam.single_mut();
-
-        if action.pressed(Action::Up)
-            || action.pressed(Action::Down)
-            || action.pressed(Action::Right)
-            || action.pressed(Action::Left)
-        {
-        } else {
-            pos_c.translation = pos_c.translation.lerp(pos_p.translation, 0.03);
-        }
-    }
 }

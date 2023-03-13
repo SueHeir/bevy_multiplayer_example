@@ -1,16 +1,28 @@
 use std::collections::HashMap;
 
-use bevy::prelude::Entity;
+use bevy::prelude::Component;
 use bevy_quinnet::shared::ClientId;
 use serde::{Deserialize, Serialize};
 
 use crate::map;
 
 pub struct ClientEvent {
-    pub name: String,
+    pub name: ClientEvents,
     pub map_type: u8,
     pub type_id: u32,
     pub client_id: ClientId,
+}
+#[derive(PartialEq, Debug, Clone, Deserialize, Serialize)]
+pub enum ClientEvents {
+    MOVE,
+}
+#[derive(Component)]
+pub struct CurrentClientEventTrigger(pub ClientEvents);
+
+pub struct ServerUpdateMapEvent {
+    pub vertexes: Vec<VertexUpdate>,
+    pub edges: Vec<EdgeUpdate>,
+    pub materials: Vec<MaterialUpdate>,
 }
 
 #[derive(bevy::prelude::Resource, Debug, Clone, Default)]
@@ -33,7 +45,7 @@ pub enum ClientMessage {
         message: String,
     },
     SendEvent {
-        name: String,
+        name: ClientEvents,
         map_type: u8,
         type_id: u32,
     },
@@ -65,6 +77,12 @@ pub enum ServerMessage {
     UpdatePlayers {
         players: Vec<Player>,
     },
+
+    UpdateMap {
+        vertexes: Vec<VertexUpdate>,
+        edges: Vec<EdgeUpdate>,
+        materials: Vec<MaterialUpdate>,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vertex {
@@ -76,14 +94,9 @@ pub struct Vertex {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Player {
+pub struct VertexUpdate {
     pub id: u32,
-    pub x: f32,
-    pub y: f32,
-    pub rotation: i32,
-    pub current_vertex: u32,
-    pub next_vertex: u32,
-    pub client_owner_id: ClientId,
+    pub filled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +107,12 @@ pub struct Edge {
     pub y: f32,
     pub rotation: f32,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EdgeUpdate {
+    pub id: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Material {
     pub id: u32,
@@ -103,6 +122,22 @@ pub struct Material {
     pub material_type: u8,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaterialUpdate {
+    pub id: u32,
+    pub owner: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Player {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub rotation: i32,
+    pub current_vertex: u32,
+    pub next_vertex: Option<u32>,
+    pub client_owner_id: ClientId,
+}
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // pub struct Adjacencies {
 //     pub edge_list: Vec<u32>,

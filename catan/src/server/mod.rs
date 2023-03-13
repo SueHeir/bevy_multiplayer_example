@@ -5,7 +5,7 @@ pub struct ServerPlugin;
 mod systems;
 
 impl Plugin for ServerPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_system(systems::handle_client_move_player);
+    fn build(&self, _app: &mut App) {
+        //If this is even needed
     }
 }

@@ -1,10 +1,13 @@
-use std::{collections::HashMap, time::Duration};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Duration,
+};
 
 use bevy::{app::ScheduleRunnerSettings, prelude::*};
 use bevy_quinnet::{
     server::{
         certificate::CertificateRetrievalMode, ConnectionLostEvent, Endpoint, QuinnetServerPlugin,
-        Server, ServerConfigurationData,
+        Server, ServerConfiguration,
     },
     shared::{channel::ChannelId, ClientId},
 };
@@ -22,7 +25,7 @@ fn handle_client_messages(
     mut users: ResMut<protocol::Users>,
     mut player_spawn: EventWriter<players::PlayerSpawnEvent>,
     mut client_event: EventWriter<protocol::ClientEvent>,
-    mut init_map: EventWriter<map::InitMapSend>,
+    mut init_map: EventWriter<map::server_map::InitMapSend>,
 ) {
     let endpoint = server.endpoint_mut();
     for client_id in endpoint.clients() {
@@ -58,7 +61,7 @@ fn handle_client_messages(
                             )
                             .unwrap();
                         //Send Map
-                        init_map.send(map::InitMapSend { client_id });
+                        init_map.send(map::server_map::InitMapSend { client_id });
                         //Spawn Player
                         player_spawn.send(players::PlayerSpawnEvent {
                             current_vertex: None,
@@ -148,8 +151,13 @@ struct PlayerChannel(ChannelId);
 fn start_listening(mut server: ResMut<Server>, mut commands: Commands) {
     server
         .start_endpoint(
-            ServerConfigurationData::new("127.0.0.1".to_string(), 6000, "0.0.0.0".to_string()),
-            CertificateRetrievalMode::GenerateSelfSigned,
+            ServerConfiguration::from_addr(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+                6000,
+            )),
+            CertificateRetrievalMode::GenerateSelfSigned {
+                server_hostname: "TheMainServer".to_string(),
+            },
         )
         .unwrap();
 
@@ -175,14 +183,13 @@ fn main() {
                 .set(
                     // here we configure the main window
                     WindowPlugin {
-                        window: WindowDescriptor {
-                            title: "Catan Server".to_owned(),
-                            width: 640.0,
-                            height: 360.0,
+                        // window: WindowDescriptor {
+                        //     title: "Catan Server".to_owned(),
+                        //     width: 640.0,
+                        //     height: 360.0,
 
-                            ..Default::default()
-                        },
-
+                        //     ..Default::default()
+                        // },
                         ..Default::default()
                     },
                 )
@@ -190,9 +197,9 @@ fn main() {
         )
         .add_startup_system(setup)
         .add_plugin(QuinnetServerPlugin::default())
-        .add_plugin(map::MapPlugin)
-        .add_plugin(players::PlayersPlugin)
-        .add_plugin(camera::CameraPlugin)
+        .add_plugin(map::ServerMapPlugin)
+        .add_plugin(players::ServerPlayersPlugin)
+        .add_plugin(camera::ServerCameraPlugin)
         .add_plugin(server::ServerPlugin)
         .insert_resource(protocol::Users::default())
         .add_startup_system(start_listening)
