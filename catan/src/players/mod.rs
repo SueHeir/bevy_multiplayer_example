@@ -23,7 +23,7 @@ pub struct ServerPlayersPlugin;
 impl Plugin for ServerPlayersPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(PlayersPlugin)
-            .add_system(server_players::server_spawn_players)
+            .add_system(server_players::spawn_players)
             .add_system(server_players::send_game_state)
             .add_system(server_players::handle_client_move_player);
     }
@@ -34,8 +34,10 @@ pub struct ClientPlayersPlugin;
 impl Plugin for ClientPlayersPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(PlayersPlugin)
-            .add_system(client_players::client_spawn_players)
-            .add_system(client_players::move_my_player);
+            .add_system(client_players::spawn_players)
+            .add_system(client_players::move_my_player)
+            .add_system(client_players::update_players)
+            .add_event::<protocol::ServerUpdatePlayerEvent>();
     }
 }
 
@@ -111,6 +113,7 @@ fn move_players(
     for (_entity, mut pos, mut player) in players.iter_mut() {
         if player.next_entity.len() > 0 {
             if let Ok((_e, vert_pos, _adj, mut vert)) = vertexes.get_mut(player.next_entity[0]) {
+                vert.filled = true;
                 player.state = States::MoveToEntity;
                 let direction = Vec2::new(
                     vert_pos.translation.x - pos.translation.x,

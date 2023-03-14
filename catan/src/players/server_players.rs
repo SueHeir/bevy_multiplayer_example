@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use super::*;
 use map;
-pub fn server_spawn_players(
+pub fn spawn_players(
     mut commands: Commands,
     mut player_spawn: EventReader<PlayerSpawnEvent>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
@@ -136,19 +136,14 @@ pub(crate) fn handle_client_move_player(
         ),
         (With<map::Vertex>, Without<Player>),
     >,
+    vertex_lookup: Res<map::VertexClientServerLookup>,
 ) {
     for event in client_event.iter() {
         if event.name != protocol::ClientEvents::MOVE {
             continue;
         }
 
-        let mut target_vert = None;
-        for (e, vert, _ent_adj, _click) in vertexes.iter() {
-            if vert.id == event.type_id {
-                target_vert = Some(e);
-                break;
-            }
-        }
+        let target_vert = vertex_lookup.0.get(&event.type_id);
 
         if target_vert.is_none() {
             continue;
@@ -156,7 +151,7 @@ pub(crate) fn handle_client_move_player(
 
         for mut player in players.iter_mut() {
             if player.client_owner_id == event.client_id {
-                let vert = vertexes.get(target_vert.unwrap()).unwrap();
+                let vert = vertexes.get(*target_vert.unwrap()).unwrap();
 
                 if vert.2.vertex_list.contains(&player.current_vertex) && !vert.1.filled {
                     if player.state == super::States::Idle {

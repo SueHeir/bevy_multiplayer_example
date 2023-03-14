@@ -21,7 +21,6 @@ serde_json = "1.0.93"
 serde = { version = "1.0.152", features = ["derive"] }
 rand = "0.8.5"
 bevy_quinnet = "0.4.0"   
-seldom_state = "0.4.0"
 bevy_easings = "0.10.0"
 
 

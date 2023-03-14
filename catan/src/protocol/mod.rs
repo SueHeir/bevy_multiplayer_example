@@ -25,6 +25,10 @@ pub struct ServerUpdateMapEvent {
     pub materials: Vec<MaterialUpdate>,
 }
 
+pub struct ServerUpdatePlayerEvent {
+    pub players: Vec<Player>,
+}
+
 #[derive(bevy::prelude::Resource, Debug, Clone, Default)]
 pub struct Users {
     pub self_id: ClientId,

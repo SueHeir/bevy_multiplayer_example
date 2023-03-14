@@ -1,7 +1,7 @@
 use super::*;
 
 use bevy_quinnet::client::Client;
-pub fn client_spawn_players(
+pub fn spawn_players(
     mut commands: Commands,
     mut player_spawn: EventReader<PlayerSpawnEvent>,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
@@ -110,4 +110,87 @@ pub fn move_my_player(
             }
         }
     }
+}
+
+pub fn update_players(
+    mut update_player: EventReader<protocol::ServerUpdatePlayerEvent>,
+    mut players_query: Query<
+        (Entity, &mut Transform, &mut Player),
+        (With<Player>, Without<map::Vertex>),
+    >,
+    vertex_lookup: Res<map::VertexClientServerLookup>,
+    mut init_player: EventWriter<PlayerSpawnEvent>,
+    mut commands: Commands,
+) {
+    let players = update_player.iter().last();
+
+    if players.is_none() {
+        return;
+    }
+
+    for play in players.unwrap().players.iter() {
+        let vert = vertex_lookup.0.get(&play.current_vertex);
+
+        let mut next_vert = None;
+        if play.next_vertex.is_some() {
+            next_vert = vertex_lookup.0.get(&play.next_vertex.unwrap());
+        }
+
+        if vert.is_some() {
+            let mut player_found = false;
+            for (_e, mut pos, mut player) in players_query.iter_mut() {
+                if play.id == player.id {
+                    player_found = true;
+
+                    // pos.translation =
+                    //     pos.translation.lerp(Vec3::new(play.x, play.y, 100.0), 1.0);
+                    // if player.state = players::States::Idle
+                    // println!("{:?}", play.current_vertex);
+                    // println!("{:?}", play.next_vertex);
+                    player.current_vertex = *vert.unwrap();
+                    player.roation_index = play.rotation;
+                    if next_vert.is_some() {
+                        if !player.next_entity.contains(next_vert.unwrap()) {
+                            player.next_entity.push(*next_vert.unwrap());
+                        }
+
+                        //println!("is_some")
+                    } else {
+                        player.next_entity.clear();
+                        player.next_entity_id = None;
+                        pos.translation.x = play.x;
+                        pos.translation.y = play.y;
+                        //println!("else")
+                    }
+                    player.next_entity_id = play.next_vertex;
+                }
+            }
+
+            if !player_found {
+                init_player.send(PlayerSpawnEvent {
+                    current_vertex: vert.copied(),
+                    x: Some(play.x),
+                    y: Some(play.y),
+                    id: Some(play.id),
+                    client_owner_id: play.client_owner_id,
+                });
+                info!("Created New Player");
+            }
+        } else {
+            info!("Can't find vertex to spawn player")
+        }
+    }
+    // for (e, _pos, player) in players_query.iter() {
+    //     let mut player_found = false;
+    //     for play in players.unwrap().players.iter() {
+    //         if play.id == player.id {
+    //             player_found = true;
+    //         }
+    //     }
+
+    //     if !player_found {
+    //         commands.entity(e).despawn();
+    //         info!("Deleted Player")
+    //     }
+    // }
 }

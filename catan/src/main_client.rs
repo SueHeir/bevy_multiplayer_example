@@ -71,16 +71,8 @@ fn handle_server_messages(
     mut users: ResMut<protocol::Users>,
     mut client: ResMut<Client>,
     mut init_map: EventWriter<map::MapObjectSpawnEvent>,
-    mut init_player: EventWriter<players::PlayerSpawnEvent>,
     mut update_map: EventWriter<protocol::ServerUpdateMapEvent>,
-    mut players_query: Query<
-        (Entity, &mut Transform, &mut players::Player),
-        (With<players::Player>, Without<map::Vertex>),
-    >,
-    vertex_query: Query<(Entity, &mut map::Vertex), (With<map::Vertex>, Without<players::Player>)>,
-
-    mut map_is_init: Local<bool>,
-    mut commands: Commands,
+    mut update_player: EventWriter<protocol::ServerUpdatePlayerEvent>,
 ) {
     while let Some(message) = client
         .connection_mut()
@@ -165,7 +157,6 @@ fn handle_server_messages(
                         vertex_start: false,
                     })
                 }
-                *map_is_init = true;
             }
             ServerMessage::UpdateMap {
                 vertexes,
@@ -177,80 +168,7 @@ fn handle_server_messages(
                 materials,
             }),
             ServerMessage::UpdatePlayers { players } => {
-                if *map_is_init {
-                    for play in players.iter() {
-                        let mut vert = None;
-                        let mut next_vert = None;
-
-                        for (e, vertex) in vertex_query.iter() {
-                            if vertex.id == play.current_vertex {
-                                vert = Some(e);
-                            }
-                            if play.next_vertex.is_some() {
-                                if vertex.id == play.next_vertex.unwrap() {
-                                    next_vert = Some(e);
-                                }
-                            }
-                        }
-
-                        if vert.is_some() {
-                            let mut player_found = false;
-                            for (_e, mut pos, mut player) in players_query.iter_mut() {
-                                if play.id == player.id {
-                                    player_found = true;
-
-                                    // pos.translation =
-                                    //     pos.translation.lerp(Vec3::new(play.x, play.y, 100.0), 1.0);
-                                    // if player.state = players::States::Idle
-                                    // println!("{:?}", play.current_vertex);
-                                    // println!("{:?}", play.next_vertex);
-                                    player.current_vertex = vert.unwrap();
-                                    player.roation_index = play.rotation;
-                                    if next_vert.is_some() {
-                                        if !player.next_entity.contains(&next_vert.unwrap()) {
-                                            player.next_entity.push(next_vert.unwrap());
-                                        }
-
-                                        //println!("is_some")
-                                    } else {
-                                        player.next_entity.clear();
-                                        player.next_entity_id = None;
-                                        pos.translation.x = play.x;
-                                        pos.translation.y = play.y;
-                                        //println!("else")
-                                    }
-                                    player.next_entity_id = play.next_vertex;
-                                }
-                            }
-
-                            if !player_found {
-                                init_player.send(PlayerSpawnEvent {
-                                    current_vertex: vert,
-                                    x: Some(play.x),
-                                    y: Some(play.y),
-                                    id: Some(play.id),
-                                    client_owner_id: play.client_owner_id,
-                                });
-                                info!("Created New Player");
-                            }
-                        } else {
-                            info!("Can't find vertex to spawn player")
-                        }
-                    }
-                    for (e, _pos, player) in players_query.iter() {
-                        let mut player_found = false;
-                        for play in players.iter() {
-                            if play.id == player.id {
-                                player_found = true;
-                            }
-                        }
-
-                        if !player_found {
-                            commands.entity(e).despawn();
-                            info!("Deleted Player")
-                        }
-                    }
-                }
+                update_player.send(protocol::ServerUpdatePlayerEvent { players })
             }
         }
     }
@@ -291,6 +209,5 @@ fn main() {
         .add_startup_system(join_game.in_base_set(StartupSet::Startup))
         .add_system(handle_server_messages)
         .add_system(on_app_exit)
-        .add_system(handle_server_messages)
         .run();
 }

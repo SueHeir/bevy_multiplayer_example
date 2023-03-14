@@ -6,6 +6,7 @@ use crate::protocol;
 pub fn update_map(
     mut update_map: EventReader<protocol::ServerUpdateMapEvent>,
     mut query_vertexes: Query<(Entity, &mut Vertex), With<Vertex>>,
+    vertex_lookup: Res<VertexClientServerLookup>,
     // query_edges: Query<(Entity, &mut Edge), (With<Edge>, Without<Vertex>, Without<Material>)>,
     // query_materials: Query<
     //     (Entity, &mut Material),
@@ -19,11 +20,15 @@ pub fn update_map(
     }
 
     for vertex in update.unwrap().vertexes.iter() {
-        for (_e, mut vert) in query_vertexes.iter_mut() {
-            if vert.id == vertex.id {
+        if let Some(v) = vertex_lookup.0.get(&vertex.id) {
+            if let Ok((_e, mut vert)) = query_vertexes.get_mut(*v) {
                 vert.filled = vertex.filled;
-                break;
+                continue;
+            } else {
+                info!("failed to query vertex from a vertex lookup")
             }
+        } else {
+            info!("Vertex Lookup Failed")
         }
     }
 }

@@ -1,10 +1,10 @@
+use crate::protocol;
 use bevy::prelude::*;
 use bevy_interact_2d::{Group, Interactable, InteractionState};
 use bevy_quinnet::server::Server;
 use serde::{Deserialize, Serialize};
 use serde_json;
-
-use crate::protocol;
+use std::collections::HashMap;
 mod client_map;
 pub(crate) mod server_map;
 
@@ -128,6 +128,12 @@ struct MapTextures {
     padding_x: f32,
     padding_y: f32,
 }
+#[derive(Resource)]
+pub struct VertexClientServerLookup(pub HashMap<u32, Entity>);
+#[derive(Resource)]
+pub struct EdgeClientServerLookup(pub HashMap<u32, Entity>);
+#[derive(Resource)]
+pub struct MaterialClientServerLookup(pub HashMap<u32, Entity>);
 
 #[derive(Debug, Deserialize, Clone)]
 struct MapInitData {
@@ -185,6 +191,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     };
 
     commands.insert_resource(map_textures);
+    commands.insert_resource(VertexClientServerLookup(HashMap::new()));
+    commands.insert_resource(EdgeClientServerLookup(HashMap::new()));
+    commands.insert_resource(MaterialClientServerLookup(HashMap::new()));
 }
 
 fn animate_map_objects(
@@ -277,6 +286,9 @@ fn spawn_map_object_system(
     mut commands: Commands,
     mut texture_atlases: ResMut<Assets<TextureAtlas>>,
     map_textures: Res<MapTextures>,
+    mut vertex_lookup: ResMut<VertexClientServerLookup>,
+    mut edge_lookup: ResMut<EdgeClientServerLookup>,
+    mut material_lookup: ResMut<MaterialClientServerLookup>,
 ) {
     for spawn in spawn_data.iter() {
         if spawn.map_type == VERTEX {
@@ -332,6 +344,8 @@ fn spawn_map_object_system(
                 if spawn.vertex_start {
                     commands.entity(entity).insert(VertexStart);
                 }
+
+                vertex_lookup.0.insert(spawn.map_type_id, entity);
             }
         }
         if spawn.map_type == EDGE {
@@ -347,7 +361,7 @@ fn spawn_map_object_system(
 
             // info!("Spawn map object system");
             // println!("{} {}", spawn.x, spawn.y);
-            commands
+            let entity = commands
                 .spawn(SpriteSheetBundle {
                     texture_atlas: texture_atlas_handle,
                     transform: Transform {
@@ -386,7 +400,10 @@ fn spawn_map_object_system(
                     _map_type: EDGE,
                     animation_timer: 0.0,
                     mana_type: 0,
-                });
+                })
+                .id();
+
+            edge_lookup.0.insert(spawn.map_type_id, entity);
         }
         if spawn.map_type == MATERIAL {
             let texture_atlas = TextureAtlas::from_grid(
@@ -401,7 +418,7 @@ fn spawn_map_object_system(
 
             // info!("Spawn map object system");
             // println!("{} {}", spawn.x, spawn.y);
-            commands
+            let entity = commands
                 .spawn(SpriteSheetBundle {
                     texture_atlas: texture_atlas_handle,
                     transform: Transform::from_xyz(spawn.x, spawn.y, 10.0),
@@ -430,7 +447,10 @@ fn spawn_map_object_system(
                     _map_type: spawn.map_type,
                     animation_timer: 0.0,
                     mana_type: spawn.material_type.unwrap(),
-                });
+                })
+                .id();
+
+            material_lookup.0.insert(spawn.map_type_id, entity);
         }
     }
 }
