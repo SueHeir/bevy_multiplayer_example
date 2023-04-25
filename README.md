@@ -1,6 +1,6 @@
-# Rust_Catan
+# Bevy Multiplayer Example
 
-This will eventually be a multiplayer catan game written in Rust with Bevy!
+A multiplayer game example written in Rust with Bevy!
 
 ## Current Plugins used
 
